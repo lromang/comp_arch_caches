@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 #include "cache.h"
 #include "main.h"
@@ -25,6 +26,7 @@ static int cache_writealloc = DEFAULT_CACHE_WRITEALLOC;
 static Pcache icache;
 static Pcache dcache;
 static Pcache ucache;
+static Pcache_line free_cache_lines;
 static cache c1;
 static cache c2;
 static cache_stat cache_stat_inst;
@@ -96,7 +98,7 @@ void init_cache()
     /*------------------------------------------*/
     ucache->index_mask_offset = LOG2(cache_block_size);
     ucache->index_mask        = ~(0xFFFFFFFF << (ucache->index_mask_offset +
-      LOG2(ucache->n_sets)));
+                                                 LOG2(ucache->n_sets)));
     /*------------------------------------------*/
     /* Allocación de memoria */
     /*------------------------------------------*/
@@ -113,6 +115,7 @@ void init_cache()
         ucache->set_contents[i]= 0;
       }
     ucache->contents = 0;
+    free_cache_lines = NULL;
   }else{
     icache = &c1;
     dcache = &c2;
@@ -136,47 +139,194 @@ void init_cache()
 /************************************************************/
 
 /************************************************************/
+Pcache_line get_free_line(void)
+    {
+    Pcache_line head = free_cache_lines;
+    
+    if (head != NULL)
+        {
+        free_cache_lines = head->LRU_next;
+        }
+    else
+        {
+        head = (Pcache_line)malloc(sizeof(cache_line));
+
+        if (head == NULL)
+            return NULL;
+        }
+    
+    memset((void*)head, 0, sizeof(cache_line));
+
+    return head;
+    }
+
+/************************************************************/
+
+void insert_head(Pcache_line * head, Pcache_line * tail, Pcache_line item)
+    {
+    if (item->LRU_prev)
+        {
+        item->LRU_prev->LRU_next = item->LRU_next;
+        }
+    else
+        {
+        /* item at head */
+        return;
+        }
+
+    if (item->LRU_next)
+        {
+        item->LRU_next->LRU_prev = item->LRU_prev;
+        }
+    else
+        {
+        /* item at tail */
+        *tail = item->LRU_prev;
+        }    
+    
+    item->LRU_next = *head;
+    item->LRU_prev = (Pcache_line)NULL;
+
+    if (item->LRU_next)
+        item->LRU_next->LRU_prev = item;
+    else
+        *tail = item;
+
+    *head = item;
+    }
+
+/************************************************************/
+
+
+/************************************************************/
 void perform_access(addr, access_type)
      unsigned addr, access_type;
 {
   Pcache_line LRU_aux;
   unsigned tag, index;
-  /* handle an access to the cache */  
-  index = (addr & ucache->index_mask)  >> ucache->index_mask_offset;
-  tag   = (addr & ~ucache->index_mask) >> (ucache->index_mask_offset +
-                                           LOG2(ucache->n_sets));
-  LRU_aux = ucache->LRU_head[index];  
-  cache_stat_data.accesses++;
-  cache_stat_inst.accesses++;
-  if(cache_split == 0){
+  /* Maneja accesos a cache */
+
+  /*
+    Verifica si el acceso es carga de datos o instrucciones
+    e incrementa los contadores respectivamente
+   */
+  if(access_type == TRACE_INST_LOAD){
+      cache_stat_inst.accesses++;
+  }else{
+    cache_stat_data.accesses++;
+  }
+
+  /* Verifica si el cache está unificado */
+  if(cache_split == FALSE){
+
+    /* Calcula índice y tag */
+    index = (addr & ucache->index_mask)  >> ucache->index_mask_offset;
+    tag   = (addr & ~ucache->index_mask) >> (ucache->index_mask_offset +
+                                             LOG2(ucache->n_sets));
+
+
+    /* Verifica si el índice está en el rango de direcciones */
     if((int)index <= ucache->n_sets){
-      /* Verificar si la dirección se encuentra en el Cache*/
-      if(LRU_aux != NULL){
+
+      /* Accede a la línea de interés  e incrementa número de accesos */
+      LRU_aux = ucache->LRU_head[index];
+
+      /*
+        Recorrer todos los ways de la línea
+        en búsqueda del tag.
+      */
+      while(LRU_aux != NULL){
+
+        /* Verificar si los tags coinciden*/
         if(LRU_aux->tag == tag){
+
+          /* Verificar si el acceso es para almacenar datos*/
           if(access_type == TRACE_DATA_STORE){
+
+            /* Marca el bit como sucio*/
             LRU_aux->dirty = TRUE;
-             insert(&ucache->LRU_head[index], 
-                   &ucache->LRU_tail[index], 
-                   LRU_aux);            
-            ucache->set_contents[index]++;            
-            LRU_aux->tag = tag;
           }
+
+          /* inserta valor*/
+          insert_head(&ucache->LRU_head[index],
+                 &ucache->LRU_tail[index],
+                 LRU_aux);
+          
+          /* Sale de rutina */
+          return;
         }
+
+        /* Obtiene siguiente elemento en la línea*/
+        LRU_aux = LRU_aux->LRU_next;
       }
-      if(access_type == TRACE_INST_LOAD)
-        {
-          cache_stat_inst.misses++;
-          cache_stat_inst.demand_fetches += words_per_block;
-        }else{
+
+      /*
+        Verifica tipo de acceso fallido e incrementa
+        estadísticas
+      */
+      if(access_type == TRACE_INST_LOAD){
+        cache_stat_inst.misses++;
+        cache_stat_inst.demand_fetches += words_per_block;
+      }else{
         cache_stat_data.misses++;
         cache_stat_data.demand_fetches += words_per_block;
-      }        
+      }
+
+      /*
+        En caso de fallo, verifica si la línea está llena y
+        realiza reemplazo LRU (en la cola)
+      */
+      if(ucache->set_contents[index] == ucache->associativity){
+
+        /* En caso de que esté sucia la escribe en memoria*/
+        if(ucache->LRU_tail[index]->dirty == TRUE){
+          cache_stat_data.copies_back += words_per_block;
+        }
+
+        /* Reemplazar tag de la cola */
+        ucache->LRU_tail[index]->tag = tag;
+
+        /* Si fue escritura lo ponemos como sucio */
+        if(access_type == TRACE_DATA_STORE){
+          ucache->LRU_tail[index]->dirty = TRUE;
+        }
+
+        /* Incrementa número de reemplazos */
+        if(access_type == TRACE_INST_LOAD){
+          cache_stat_inst.replacements++;
+        }else{
+          cache_stat_data.replacements++;
+        }
+        return;
+      }
+
+      /*
+        En caso de fallo, si la línea no está
+        llena obtiene un way y realiza una inserción.
+      */
+      LRU_aux = get_free_line();
+
+      if(LRU_aux != NULL){
+        insert(&ucache->LRU_head[index],
+               &ucache->LRU_tail[index],
+               LRU_aux);
+
+        ucache->set_contents[index]++;
+        LRU_aux->tag = tag;
+
+        if(access_type == TRACE_DATA_STORE){
+          LRU_aux->dirty = TRUE;
+        }
+      }else{
+        exit(-1);
+        }
     }else{
       printf("El índice: %d, es mayor al número de localidades %d",
              index, ucache->n_sets);
+      return;
     }
   }else{
-    
+
   }
 }
 /************************************************************/
