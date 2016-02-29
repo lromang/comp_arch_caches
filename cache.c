@@ -443,12 +443,106 @@ void perform_access(addr, access_type)
         }else{
           exit(-1);
         }
+      }else{
+        printf("El índice: %d, es mayor al número de localidades %d",
+               index, dcache->n_sets);
+        return;
       }
       /* Datos */
-      }else{
+    }else{
+      index = (addr & dcache->index_mask)  >> dcache->index_mask_offset;
+      tag   = (addr & ~dcache->index_mask) >> (dcache->index_mask_offset +
+                                               LOG2(dcache->n_sets));
+      /* Verifica si el índice está en el rango de direcciones */
+      if((int)index <= dcache->n_sets){
 
-    }
-  }
+        /* Accede a la línea de interés  e incrementa número de accesos */
+        LRU_aux = dcache->LRU_head[index];
+        /*
+          Recorrer todos los ways de la línea
+          en búsqueda del tag.
+        */
+        while(LRU_aux != NULL){
+
+          /* Verificar si los tags coinciden*/
+          if(LRU_aux->tag == tag){
+
+            /* Verificar si el acceso es para almacenar datos*/
+            if(access_type == TRACE_DATA_STORE){
+
+              /* Marca el bit como sucio*/
+              LRU_aux->dirty = TRUE;
+            }
+
+            /* inserta valor*/
+            insert_head(&dcache->LRU_head[index],
+                        &dcache->LRU_tail[index],
+                        LRU_aux);
+            
+            /* Sale de rutina */
+            return;
+          }
+
+          /* Obtiene siguiente elemento en la línea*/
+          LRU_aux = LRU_aux->LRU_next;
+        }
+
+        /* Aumentar estadísticas */
+        cache_stat_data.misses++;
+        cache_stat_data.demand_fetches += words_per_block;
+
+        /*
+          En caso de fallo, verifica si la línea está llena y
+          realiza reemplazo LRU (en la cola)
+        */
+        if(dcache->set_contents[index] == dcache->associativity){
+
+          /* En caso de que esté sucia la escribe en memoria*/
+          if(dcache->LRU_tail[index]->dirty == TRUE){
+            cache_stat_data.copies_back += words_per_block;
+          }
+
+          /* Reemplazar tag de la cola */
+          dcache->LRU_tail[index]->tag = tag;
+
+          /* Si fue escritura lo ponemos como sucio */
+          if(access_type == TRACE_DATA_STORE){
+            dcache->LRU_tail[index]->dirty = TRUE;
+          }
+
+          /* Incrementa número de reemplazos */
+          cache_stat_data.replacements++;
+        
+          return;
+        }
+
+        /*
+          En caso de fallo, si la línea no está
+          llena obtiene un way y realiza una inserción.
+        */
+        LRU_aux = get_free_line();
+        
+        if(LRU_aux != NULL){
+          insert(&dcache->LRU_head[index],
+                 &dcache->LRU_tail[index],
+                 LRU_aux);
+
+          dcache->set_contents[index]++;
+          LRU_aux->tag = tag;
+          
+          if(access_type == TRACE_DATA_STORE){
+            LRU_aux->dirty = TRUE;
+          }
+        }else{
+          exit(-1);
+        }
+      }else{
+        printf("El índice: %d, es mayor al número de localidades %d",
+               index, dcache->n_sets);
+        return;
+      }
+    } // Acceso a datos
+  } // Split == TRUE
 }
 /************************************************************/
 
