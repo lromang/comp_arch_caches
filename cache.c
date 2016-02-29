@@ -87,21 +87,21 @@ void init_cache()
   /* Inicializar tamaño */
   /*------------------------------------------*/
   if(cache_split == 0){
-    ucache                = &c1;
+    ucache = dcache = icache  = &c1;
     ucache->size          = cache_usize;
-    ucache->associativity = 1;
-    ucache->n_sets        = (cache_usize / ucache->associativity) / cache_block_size;
+    ucache->associativity = cache_assoc;
+    ucache->n_sets        = (cache_usize * cache_assoc) / cache_block_size;
     /*------------------------------------------*/
     /* Mascaras */
     /*------------------------------------------*/
     ucache->index_mask_offset = LOG2(cache_block_size);
     ucache->index_mask        = ~(0xFFFFFFFF << (ucache->index_mask_offset +
-                                                 LOG2(ucache->n_sets)));
+      LOG2(ucache->n_sets)));
     /*------------------------------------------*/
     /* Allocación de memoria */
     /*------------------------------------------*/
-    ucache->LRU_head = (Pcache_line *)malloc(sizeof(Pcache_line) * ucache->n_sets);
-    ucache->LRU_tail = (Pcache_line *)malloc(sizeof(Pcache_line) * ucache->n_sets);
+    ucache->LRU_head     = (Pcache_line *)malloc(sizeof(Pcache_line) * ucache->n_sets);    
+    ucache->LRU_tail     = (Pcache_line *)malloc(sizeof(Pcache_line) * ucache->n_sets);
     ucache->set_contents = (int *)malloc(sizeof(int) * ucache->n_sets);
     /*------------------------------------------*/
     /* Vaciar contenido cache */
@@ -139,22 +139,41 @@ void init_cache()
 void perform_access(addr, access_type)
      unsigned addr, access_type;
 {
+  Pcache_line LRU_aux;
   unsigned tag, index;
   /* handle an access to the cache */  
-  index = (addr & ucache->index_mask) >> ucache->index_mask_offset;
-  tag   = (addr & (~ucache->index_mask)) >> (ucache->index_mask_offset +
-                                             LOG2(ucache->n_sets));
+  index = (addr & ucache->index_mask)  >> ucache->index_mask_offset;
+  tag   = (addr & ~ucache->index_mask) >> (ucache->index_mask_offset +
+                                           LOG2(ucache->n_sets));
+  LRU_aux = ucache->LRU_head[index];  
+  cache_stat_data.accesses++;
+  cache_stat_inst.accesses++;
   if(cache_split == 0){
     if((int)index <= ucache->n_sets){
-      cache_stat_data.accesses++;
-      cache_stat_inst.accesses++;
       /* Verificar si la dirección se encuentra en el Cache*/
-      if(ucache->LRU_head[index]->tag != tag){
-        cache_stat_data.misses++;
-        cache_stat_inst.misses++;        
+      if(LRU_aux != NULL){
+        if(LRU_aux->tag == tag){
+          if(access_type == TRACE_DATA_STORE){
+            LRU_aux->dirty = TRUE;
+             insert(&ucache->LRU_head[index], 
+                   &ucache->LRU_tail[index], 
+                   LRU_aux);            
+            ucache->set_contents[index]++;            
+            LRU_aux->tag = tag;
+          }
+        }
       }
+      if(access_type == TRACE_INST_LOAD)
+        {
+          cache_stat_inst.misses++;
+          cache_stat_inst.demand_fetches += words_per_block;
+        }else{
+        cache_stat_data.misses++;
+        cache_stat_data.demand_fetches += words_per_block;
+      }        
     }else{
-      printf("El índice: %d, es mayor al número de localidades %d", index, ucache->n_sets);
+      printf("El índice: %d, es mayor al número de localidades %d",
+             index, ucache->n_sets);
     }
   }else{
     
