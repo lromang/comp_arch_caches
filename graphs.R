@@ -85,7 +85,7 @@ for(i in 13:15){
 write    <- rbind(data[[7]], data[[8]], data[[9]])
 write$tot_traffic <- write[,5] + write[,6]
 data_assoc <- gather(write[,-c(1,2,3,5,6)], cache_type, tot_traffic, -write_policy)
-data_assoc$simul <- c(1,1,2,2,3,3)
+data_assoc$simul <- c("c", "c", "spice", "spice", "tex", "tex")
 ## PNG
 png(paste0("./output/graphs/write.png"))
 ggplot(data = data_assoc, aes(x = simul, y = tot_traffic, col = write_policy)) +
@@ -109,7 +109,7 @@ dev.off()
 allocate <- rbind(data[[4]], data[[5]], data[[6]])
 allocate$tot_traffic <- allocate[,5] + allocate[,6]
 data_assoc <- gather(allocate[,-c(1,2,3,5,6)], cache_type, tot_traffic, -allocate_policy)
-data_assoc$simul <- c(1,1,2,2,3,3)
+data_assoc$simul <- factor(c("c", "c", "spice", "spice", "tex", "tex"))
 ## PNG
 png(paste0("./output/graphs/allocate.png"))
 ggplot(data = data_assoc, aes(x = simul, y = tot_traffic, col = allocate_policy)) +

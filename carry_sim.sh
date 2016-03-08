@@ -122,12 +122,12 @@ echo "cache_size, block_size, associativity, write_policy , demand_fetch, copies
 for  i in `seq 1`
 do
     ## Write through
-    sim_through=$(../mike/sim -bs $block_size -a $assoc -wt -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
+    sim_through=$(./sim -bs $block_size -a $assoc -wt -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
                          grep -E "(fetch|back)" | awk -F ':' '{print $2}' | sed -r 's/[^0-9.]//g')
     row_through=$(echo $sim_through | sed 's/ /,/g')
 
     ## Write back
-    sim_back=$(../mike/sim -bs $block_size -a $assoc -wb -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
+    sim_back=$(./sim -bs $block_size -a $assoc -wb -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
                          grep -E "(fetch|back)" | awk -F ':' '{print $2}' | sed -r 's/[^0-9.]//g')
     row_back=$(echo $sim_back | sed 's/ /,/g')
 
@@ -153,12 +153,12 @@ echo "cache_size, block_size, associativity, allocate_policy ,demand_fetch, copi
 for  i in `seq 1`
 do
     ## Write through
-    sim_allocate=$(../mike/sim -bs $block_size -a $assoc -wb -wa -ds $cache_size -is $cache_size  "./trazas/$trace" |
+    sim_allocate=$(./sim -bs $block_size -a $assoc -wb -wa -ds $cache_size -is $cache_size  "./trazas/$trace" |
                          grep -E "(fetch|back)" | awk -F ':' '{print $2}' | sed -r 's/[^0-9.]//g')
     row_allocate=$(echo $sim_allocate | sed 's/ /,/g')
 
     ## Write back
-    sim_non_allocate=$(../mike/sim -bs $block_size -a $assoc -wb -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
+    sim_non_allocate=$(./sim -bs $block_size -a $assoc -wb -nw -ds $cache_size -is $cache_size  "./trazas/$trace" |
                          grep -E "(fetch|back)" | awk -F ':' '{print $2}' | sed -r 's/[^0-9.]//g')
     row_non_allocate=$(echo $sim_non_allocate | sed 's/ /,/g')
 
