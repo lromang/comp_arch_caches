@@ -1,0 +1,3 @@
+cache_size, block_size, associativity, allocate_policy ,demand_fetch, copies_back
+16384,64,2,wa,156000,18880
+16384,64,2,nw,0,66538

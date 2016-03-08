@@ -1,0 +1,3 @@
+cache_size, block_size, associativity, write_policy , demand_fetch, copies_back
+8192,128,2,wt,0,66538
+8192,128,2,wb,0,66538
